@@ -1,0 +1,10 @@
+name: Validate – reusable-ci-maven
+
+on:
+  workflow_dispatch:
+
+jobs:
+  validate:
+    uses: ./.github/workflows/reusable-ci-maven.yml
+    permissions:
+      contents: read

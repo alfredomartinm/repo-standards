@@ -1,0 +1,12 @@
+name: Validate – reusable-housekeeping-springboot-maven
+
+on:
+  workflow_dispatch:
+
+jobs:
+  validate:
+    uses: ./.github/workflows/reusable-housekeeping-springboot-maven.yml
+    with:
+      mode: dry-run
+    permissions:
+      contents: read
