@@ -1,0 +1,173 @@
+name: Reusable Housekeeping – Spring Boot / Maven
+
+on:
+  workflow_call:
+    inputs:
+      mode:
+        description: 'dry-run (report only) or apply (open a PR with safe fixes)'
+        type: string
+        default: 'dry-run'
+      target_branch:
+        description: 'Branch to target when opening the housekeeping PR'
+        type: string
+        default: 'main'
+
+permissions:
+  contents: write
+  pull-requests: write
+
+jobs:
+  housekeeping:
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+        with:
+          ref: ${{ inputs.target_branch }}
+          # Fetch enough history for branch operations
+          fetch-depth: 0
+
+      - name: Set up Java 21
+        uses: actions/setup-java@v4
+        with:
+          java-version: '21'
+          distribution: temurin
+          cache: maven
+
+      # ---------------------------------------------------------------
+      # Collect findings and apply safe fixes
+      # ---------------------------------------------------------------
+      - name: Run housekeeping checks
+        id: checks
+        env:
+          MODE: ${{ inputs.mode }}
+        run: |
+          set -euo pipefail
+          REPORT_FILE="HOUSEKEEPING_REPORT.md"
+          CHANGES=0
+
+          echo "# Housekeeping Report" > "$REPORT_FILE"
+          echo "" >> "$REPORT_FILE"
+          echo "Generated: $(date -u +"%Y-%m-%dT%H:%M:%SZ")" >> "$REPORT_FILE"
+          echo "Mode: $MODE" >> "$REPORT_FILE"
+          echo "" >> "$REPORT_FILE"
+          echo "## Findings" >> "$REPORT_FILE"
+          echo "" >> "$REPORT_FILE"
+
+          # --- Check: .editorconfig ---
+          if [ ! -f ".editorconfig" ]; then
+            echo "- [ ] **Missing** \`.editorconfig\`" >> "$REPORT_FILE"
+            if [ "$MODE" = "apply" ]; then
+              cat > .editorconfig <<'EDITORCONFIG'
+          root = true
+
+          [*]
+          charset = utf-8
+          end_of_line = lf
+          indent_style = space
+          indent_size = 4
+          insert_final_newline = true
+          trim_trailing_whitespace = true
+
+          [*.{yml,yaml}]
+          indent_size = 2
+
+          [*.md]
+          trim_trailing_whitespace = false
+          EDITORCONFIG
+              echo "- [x] **Applied** \`.editorconfig\` (created)" >> "$REPORT_FILE"
+              CHANGES=$((CHANGES + 1))
+            fi
+          else
+            echo "- [x] \`.editorconfig\` present" >> "$REPORT_FILE"
+          fi
+
+          # --- Check: PR template ---
+          PR_TEMPLATE=".github/PULL_REQUEST_TEMPLATE.md"
+          if [ ! -f "$PR_TEMPLATE" ]; then
+            echo "- [ ] **Missing** \`$PR_TEMPLATE\`" >> "$REPORT_FILE"
+            if [ "$MODE" = "apply" ]; then
+              mkdir -p .github
+              cat > "$PR_TEMPLATE" <<'PRTEMPLATE'
+          ## Summary
+          <!-- What does this PR do? -->
+
+          ## Risk
+          <!-- Low / Medium / High. Explain why. -->
+
+          ## Checklist
+          - [ ] Tests pass locally
+          - [ ] Relevant documentation updated
+          - [ ] No unintended side effects
+
+          ## How to Test
+          <!-- Steps to verify the change works as expected. -->
+          PRTEMPLATE
+              echo "- [x] **Applied** \`$PR_TEMPLATE\` (created)" >> "$REPORT_FILE"
+              CHANGES=$((CHANGES + 1))
+            fi
+          else
+            echo "- [x] \`$PR_TEMPLATE\` present" >> "$REPORT_FILE"
+          fi
+
+          # --- Suggested (never auto-applied): Java version in pom.xml ---
+          if [ -f "pom.xml" ]; then
+            JAVA_VERSION=$(grep -oP '(?<=<java.version>)[^<]+' pom.xml || true)
+            if [ -n "$JAVA_VERSION" ] && [ "$JAVA_VERSION" != "21" ]; then
+              echo "- [ ] **Suggested** Java version in \`pom.xml\` is \`$JAVA_VERSION\`; global default is \`21\`. Update manually." >> "$REPORT_FILE"
+            else
+              echo "- [x] Java version in \`pom.xml\` is acceptable" >> "$REPORT_FILE"
+            fi
+          fi
+
+          # --- Suggested (never auto-applied): Maven wrapper version ---
+          if [ -f ".mvn/wrapper/maven-wrapper.properties" ]; then
+            MVN_VERSION=$(grep -oP '(?<=apache-maven-)[0-9.]+' .mvn/wrapper/maven-wrapper.properties || true)
+            echo "- [ ] **Suggested** Verify Maven wrapper version (\`$MVN_VERSION\`) is current. Update manually if needed." >> "$REPORT_FILE"
+          fi
+
+          echo "" >> "$REPORT_FILE"
+          echo "## Summary" >> "$REPORT_FILE"
+          echo "" >> "$REPORT_FILE"
+          if [ "$MODE" = "apply" ]; then
+            echo "$CHANGES safe fix(es) applied." >> "$REPORT_FILE"
+          else
+            echo "Dry-run mode – no changes made. Review findings above." >> "$REPORT_FILE"
+          fi
+
+          echo "changes=$CHANGES" >> "$GITHUB_OUTPUT"
+
+      # ---------------------------------------------------------------
+      # apply mode: commit changes and open a PR
+      # ---------------------------------------------------------------
+      - name: Create housekeeping branch and PR
+        if: inputs.mode == 'apply' && steps.checks.outputs.changes != '0'
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          set -euo pipefail
+          BRANCH="housekeeping/automated-$(date +%Y%m%d)"
+          git config user.name  "github-actions[bot]"
+          git config user.email "github-actions[bot]@users.noreply.github.com"
+          git checkout -b "$BRANCH"
+          git add -A
+          git commit -m "chore(housekeeping): automated safe fixes"
+          git push origin "$BRANCH"
+          gh pr create \
+            --base "${{ inputs.target_branch }}" \
+            --head "$BRANCH" \
+            --title "chore(housekeeping): automated safe fixes $(date +%Y-%m-%d)" \
+            --label "housekeeping" \
+            --body "$(cat HOUSEKEEPING_REPORT.md)"
+
+      # ---------------------------------------------------------------
+      # dry-run mode: upload report artifact
+      # ---------------------------------------------------------------
+      - name: Upload housekeeping report
+        if: inputs.mode != 'apply' || steps.checks.outputs.changes == '0'
+        uses: actions/upload-artifact@v4
+        with:
+          name: HOUSEKEEPING_REPORT
+          path: HOUSEKEEPING_REPORT.md
+          retention-days: 30

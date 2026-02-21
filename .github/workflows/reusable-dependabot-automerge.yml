@@ -1,0 +1,79 @@
+name: Reusable Dependabot Auto-Merge
+
+# This workflow enables auto-merge for Dependabot PRs that update
+# patch or minor versions only.
+#
+# Prerequisites (in the CALLING repository):
+#   1. Auto-merge must be enabled: Settings → General → Allow auto-merge
+#   2. Branch protection rules must require at least one status check.
+#   3. Caller workflow permissions:
+#        permissions:
+#          contents: write
+#          pull-requests: write
+#
+# Major version updates are intentionally excluded – they require
+# manual review. See POLICY.md for the full dependency update policy.
+
+on:
+  workflow_call:
+
+permissions:
+  contents: write
+  pull-requests: write
+
+jobs:
+  automerge:
+    runs-on: ubuntu-latest
+    # Only run for Dependabot PRs
+    if: github.actor == 'dependabot[bot]'
+
+    steps:
+      - name: Fetch Dependabot metadata
+        id: metadata
+        uses: dependabot/fetch-metadata@v2
+        with:
+          github-token: ${{ secrets.GITHUB_TOKEN }}
+
+      # Apply standard labels to all Dependabot PRs
+      - name: Apply 'dependencies' label
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          PR_URL: ${{ github.event.pull_request.html_url }}
+        run: |
+          gh pr edit "$PR_URL" --add-label "dependencies" || true
+
+      # Enable auto-merge only for patch and minor updates
+      - name: Enable auto-merge for patch/minor updates
+        if: >
+          steps.metadata.outputs.update-type == 'version-update:semver-patch' ||
+          steps.metadata.outputs.update-type == 'version-update:semver-minor'
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          PR_URL: ${{ github.event.pull_request.html_url }}
+        run: |
+          gh pr edit "$PR_URL" --add-label "automerge" || true
+          gh pr merge --auto --squash "$PR_URL"
+
+      # Add a comment to major version PRs explaining the risk
+      - name: Comment on major version updates
+        if: steps.metadata.outputs.update-type == 'version-update:semver-major'
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          PR_URL: ${{ github.event.pull_request.html_url }}
+          DEPENDENCY_NAMES: ${{ steps.metadata.outputs.dependency-names }}
+          PREV_VERSION: ${{ steps.metadata.outputs.previous-version }}
+          NEW_VERSION: ${{ steps.metadata.outputs.new-version }}
+        run: |
+          gh pr edit "$PR_URL" --add-label "breaking-change" || true
+          gh pr comment "$PR_URL" --body "## ⚠️ Major Version Update
+
+          This PR updates **$DEPENDENCY_NAMES** from \`$PREV_VERSION\` to \`$NEW_VERSION\`.
+
+          **Auto-merge is NOT enabled for major version updates.**
+
+          Before merging, please:
+          1. Review the upstream changelog or migration guide for breaking changes.
+          2. Test the change locally or in a feature branch.
+          3. Update any code that depends on removed or changed APIs.
+
+          See [POLICY.md](https://github.com/${{ github.repository }}/blob/main/POLICY.md#major-version-updates) for the full policy."
