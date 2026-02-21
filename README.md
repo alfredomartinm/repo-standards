@@ -161,6 +161,25 @@ See [`POLICY.md`](POLICY.md) for the full dependency update policy.
 
 ---
 
+## Self-Test Workflows
+
+`repo-standards` ships two validation workflows that confirm the reusable workflows are syntactically correct and run end-to-end with their default configuration.
+
+| Workflow file | What it validates |
+|---|---|
+| `validate-reusable-ci-maven.yml` | Calls `reusable-ci-maven.yml` with default inputs |
+| `validate-reusable-housekeeping-springboot-maven.yml` | Calls `reusable-housekeeping-springboot-maven.yml` in `dry-run` mode (no commits or PRs are created) |
+
+### Running a self-test
+
+1. Navigate to **Actions** in this repository.
+2. Select the desired validate workflow from the left-hand list.
+3. Click **Run workflow** → **Run workflow**.
+
+Both workflows are triggered manually (`workflow_dispatch`) and will complete successfully on `main` without side effects.
+
+---
+
 ## Versioning
 
 This repo follows [Semantic Versioning](https://semver.org/). Stable releases are tagged (e.g., `v1`, `v1.1.0`). Adopting repos should pin to the major version tag (e.g., `@v1`) so they automatically receive non-breaking updates.
