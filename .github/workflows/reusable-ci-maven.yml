@@ -1,0 +1,31 @@
+name: Reusable CI – Maven (Java 21)
+
+on:
+  workflow_call:
+    inputs:
+      java-version:
+        description: 'Java version to use'
+        type: string
+        default: '21'
+      maven-args:
+        description: 'Additional Maven arguments'
+        type: string
+        default: ''
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Set up Java ${{ inputs.java-version }}
+        uses: actions/setup-java@v4
+        with:
+          java-version: ${{ inputs.java-version }}
+          distribution: temurin
+          cache: maven
+
+      - name: Build and verify
+        run: mvn -B verify ${{ inputs.maven-args }}
